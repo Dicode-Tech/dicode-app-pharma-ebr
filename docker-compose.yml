@@ -1,0 +1,101 @@
+version: '3.8'
+
+services:
+  # TimescaleDB - Time-series database for batch data
+  timescaledb:
+    image: timescale/timescaledb:latest-pg15
+    container_name: ebr-timescaledb
+    environment:
+      POSTGRES_USER: ${DB_USER:-ebr_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-ebr_password}
+      POSTGRES_DB: ${DB_NAME:-ebr_db}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+      - ./backend/database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-ebr_user} -d ${DB_NAME:-ebr_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ebr-network
+
+  # Redis - Cache and job queue backend
+  redis:
+    image: redis:7-alpine
+    container_name: ebr-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ebr-network
+
+  # Backend API Server
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ebr-backend
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: ${BACKEND_PORT:-3000}
+      DB_HOST: timescaledb
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-ebr_user}
+      DB_PASSWORD: ${DB_PASSWORD:-ebr_password}
+      DB_NAME: ${DB_NAME:-ebr_db}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      OPCUA_ENDPOINT: ${OPCUA_ENDPOINT:-opc.tcp://localhost:4840}
+    ports:
+      - "${BACKEND_PORT:-3000}:3000"
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+      - pdf_storage:/app/storage/pdfs
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: npm run dev
+    networks:
+      - ebr-network
+
+  # Frontend React Application
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ebr-frontend
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:3000}
+      VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:3000}
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    command: npm run dev -- --host
+    networks:
+      - ebr-network
+
+volumes:
+  timescale_data:
+  redis_data:
+  pdf_storage:
+
+networks:
+  ebr-network:
+    driver: bridge
