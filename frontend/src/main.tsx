@@ -10,6 +10,7 @@ import { BatchCreate } from './pages/BatchCreate';
 import { BatchDetail } from './pages/BatchDetail';
 import { RecipeList } from './pages/RecipeList';
 import { RecipeDetail } from './pages/RecipeDetail';
+import { RecipeForm } from './pages/RecipeForm';
 import { AuditTrail } from './pages/AuditTrail';
 import { IntegrationStatus } from './pages/IntegrationStatus';
 import { AdminPanel } from './pages/AdminPanel';
@@ -26,6 +27,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="/batches/new" element={<ProtectedRoute><BatchCreate /></ProtectedRoute>} />
           <Route path="/batches/:id" element={<ProtectedRoute><BatchDetail /></ProtectedRoute>} />
           <Route path="/recipes" element={<ProtectedRoute><RecipeList /></ProtectedRoute>} />
+          <Route path="/recipes/new" element={<ProtectedRoute roles={['admin', 'batch_manager']}><RecipeForm /></ProtectedRoute>} />
+          <Route path="/recipes/:id/edit" element={<ProtectedRoute roles={['admin', 'batch_manager']}><RecipeForm /></ProtectedRoute>} />
           <Route path="/recipes/:id" element={<ProtectedRoute><RecipeDetail /></ProtectedRoute>} />
           <Route path="/audit" element={<ProtectedRoute><AuditTrail /></ProtectedRoute>} />
           <Route path="/integrations" element={<ProtectedRoute><IntegrationStatus /></ProtectedRoute>} />

@@ -3,10 +3,12 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { Layout } from '../components/Layout';
 import { Button } from '../components/ui/Button';
 import { recipeService } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import type { Recipe } from '../types';
 import {
   ArrowLeft, Ruler, ShieldCheck, Wrench, ClipboardCheck,
-  PenLine, Clock, Loader2, FlaskConical,
+  PenLine, Clock, Loader2, FlaskConical, Pencil, Trash2,
+  FileDown, ChevronDown,
 } from 'lucide-react';
 
 const STEP_TYPE_CONFIG = {
@@ -19,9 +21,14 @@ const STEP_TYPE_CONFIG = {
 export function RecipeDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { hasRole } = useAuth();
+  const canEdit = hasRole('admin', 'batch_manager');
+
   const [recipe, setRecipe] = useState<Recipe | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -30,6 +37,31 @@ export function RecipeDetail() {
       .catch(() => setError('Failed to load recipe'))
       .finally(() => setLoading(false));
   }, [id]);
+
+  async function handleExport(format: 'json' | 'xml') {
+    if (!id || !recipe) return;
+    setExporting(true);
+    setExportOpen(false);
+    try {
+      const safeName = recipe.name.replace(/[^a-z0-9_-]/gi, '_');
+      await recipeService.exportRecipe(id, format, `${safeName}.${format}`);
+    } catch {
+      alert('Export failed.');
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!id || !recipe) return;
+    if (!confirm(`Delete recipe "${recipe.name}"? This cannot be undone.`)) return;
+    try {
+      await recipeService.deleteRecipe(id);
+      navigate('/recipes');
+    } catch {
+      alert('Failed to delete recipe.');
+    }
+  }
 
   if (loading) return (
     <Layout>
@@ -52,7 +84,7 @@ export function RecipeDetail() {
     <Layout>
       <div className="space-y-6 max-w-4xl mx-auto">
         {/* Header */}
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="flex items-start gap-4">
             <button onClick={() => navigate('/recipes')} className="mt-1 text-gray-500 hover:text-gray-700">
               <ArrowLeft className="w-5 h-5" />
@@ -63,12 +95,55 @@ export function RecipeDetail() {
               {recipe.description && <p className="text-sm text-gray-600 mt-2 max-w-xl">{recipe.description}</p>}
             </div>
           </div>
-          <Link to={`/batches/new?recipe_id=${recipe.id}`}>
-            <Button>
-              <FlaskConical className="w-4 h-4 mr-2" />
-              Use This Recipe
-            </Button>
-          </Link>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Export dropdown */}
+            <div className="relative">
+              <Button
+                variant="outline"
+                onClick={() => setExportOpen((v) => !v)}
+                disabled={exporting}
+              >
+                {exporting
+                  ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Exporting…</>
+                  : <><FileDown className="w-4 h-4 mr-2" />Export<ChevronDown className="w-3 h-3 ml-1" /></>}
+              </Button>
+              {exportOpen && (
+                <div className="absolute right-0 mt-1 w-44 bg-white rounded-lg shadow-lg border z-10">
+                  <button
+                    onClick={() => handleExport('json')}
+                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-t-lg"
+                  >
+                    Export as JSON
+                  </button>
+                  <button
+                    onClick={() => handleExport('xml')}
+                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-b-lg border-t"
+                  >
+                    Export as BatchML XML
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {canEdit && (
+              <>
+                <Button variant="outline" onClick={() => navigate(`/recipes/${id}/edit`)}>
+                  <Pencil className="w-4 h-4 mr-2" />Edit
+                </Button>
+                <Button variant="danger" onClick={handleDelete}>
+                  <Trash2 className="w-4 h-4 mr-2" />Delete
+                </Button>
+              </>
+            )}
+
+            <Link to={`/batches/new?recipe_id=${recipe.id}`}>
+              <Button>
+                <FlaskConical className="w-4 h-4 mr-2" />
+                Use This Recipe
+              </Button>
+            </Link>
+          </div>
         </div>
 
         {/* Meta */}

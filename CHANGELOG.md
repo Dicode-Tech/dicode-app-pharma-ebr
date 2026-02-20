@@ -2,10 +2,35 @@
 
 All notable changes to Dicode EBR are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
+Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [Unreleased] — 2026-02-20
+## [0.5.0] — 2026-02-20
+
+### Added — Backend
+
+- **Recipe export endpoint** (`GET /api/v1/recipes/:id/export?format=json|xml`) — exports a recipe as a native Dicode EBR JSON envelope or as ISA-88 / BatchML XML; sets correct `Content-Disposition` header for browser download; no external XML library needed (built with string templates + XML escaping)
+- **Recipe import endpoint** (`POST /api/v1/recipes/import`) — accepts `{ format: 'json'|'xml', data }` body; parses Dicode JSON envelope or BatchML XML using a lightweight regex-based parser; `created_by` is always set from the authenticated user (JWT), never from the imported file; returns `201` with the new recipe
+- **Full step fields on `POST /recipes`** — previously only `description` and `instructions` were inserted; now all step fields are saved: `step_type`, `expected_value`, `unit`, `requires_signature`, `duration_minutes`
+- **Step replacement on `PUT /recipes/:id`** — when a `steps` array is provided, existing steps are deleted and re-inserted inside a transaction; recipe header update and step replacement are atomic
+
+### Added — Frontend
+
+- **`RecipeForm` page** (`src/pages/RecipeForm.tsx`) — single page that handles both create (`/recipes/new`) and edit (`/recipes/:id/edit`) modes; header fields (name, product name, version, description); step list with per-step controls for description, type, instructions, expected value + unit (shown for measurement type only), signature requirement, and duration; up/down reorder buttons; add/remove step buttons; routes are role-gated to `admin` and `batch_manager`
+- **Import button on `RecipeList`** — "Import" button triggers a hidden `<input type="file" accept=".json,.xml">`; file is read with the browser `FileReader` API; format detected from file extension; parsed content posted to `/recipes/import`; list reloads on success
+- **"New Recipe" button on `RecipeList`** — navigates to `/recipes/new`; visible only to `admin` and `batch_manager`
+- **Export dropdown on `RecipeDetail`** — "Export" button opens a two-item menu: "Export as JSON" and "Export as BatchML XML"; triggers a blob download via Axios `responseType: 'blob'`; visible to all roles
+- **Edit and Delete actions on `RecipeDetail`** — "Edit" navigates to `/recipes/:id/edit`; "Delete" shows a confirmation dialog then calls `DELETE /recipes/:id` and navigates back to the list; both visible only to `admin` and `batch_manager`
+
+### Changed — Frontend
+
+- **`src/services/api.ts`** — replaced `updateRecipe` with `updateRecipeWithSteps` (sends `steps` array to the backend); added `exportRecipe(id, format, filename)` (blob download helper); added `importRecipe(payload)` (POST to import endpoint)
+- **`src/main.tsx`** — added routes `/recipes/new` and `/recipes/:id/edit`, both wrapped in `<ProtectedRoute roles={['admin','batch_manager']}>`
+
+---
+
+## [0.4.0] — 2026-02-20
 
 ### Added — Backend
 
@@ -43,7 +68,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [Unreleased] — 2026-02-19
+## [0.3.0] — 2026-02-19
 
 ### Added — Backend
 

@@ -112,11 +112,27 @@ export const recipeService = {
   createRecipe: (data: Partial<Recipe> & { steps?: Partial<import('../types').RecipeStep>[] }): Promise<Recipe> =>
     api.post('/recipes', data).then((r) => r.data),
 
-  updateRecipe: (id: string, data: Partial<Recipe>): Promise<Recipe> =>
+  updateRecipeWithSteps: (
+    id: string,
+    data: { name?: string; product_name?: string; version?: string; description?: string; steps?: Partial<import('../types').RecipeStep>[] }
+  ): Promise<Recipe> =>
     api.put(`/recipes/${id}`, data).then((r) => r.data),
 
   deleteRecipe: (id: string): Promise<void> =>
     api.delete(`/recipes/${id}`).then(() => undefined),
+
+  exportRecipe: (id: string, format: 'json' | 'xml', filename: string): Promise<void> =>
+    api.get(`/recipes/${id}/export`, { params: { format }, responseType: 'blob' }).then((r) => {
+      const url = URL.createObjectURL(r.data as Blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    }),
+
+  importRecipe: (payload: { format: 'json' | 'xml'; data: unknown }): Promise<Recipe> =>
+    api.post('/recipes/import', payload).then((r) => r.data),
 };
 
 // ─── Integrations ────────────────────────────────────────────────────────────
