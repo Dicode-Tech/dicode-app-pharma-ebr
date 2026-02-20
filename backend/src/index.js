@@ -33,6 +33,7 @@ fastify.register(require('./routes/auth'), { prefix: '/api/v1/auth' });
 fastify.register(require('./routes/users'), { prefix: '/api/v1/users' });
 fastify.register(require('./routes/batches'), { prefix: '/api/v1/batches' });
 fastify.register(require('./routes/recipes'), { prefix: '/api/v1/recipes' });
+fastify.register(require('./routes/audit'), { prefix: '/api/v1/audit' });
 fastify.register(require('./routes/integrations'), { prefix: '/api/v1/integrations' });
 
 // Error handler

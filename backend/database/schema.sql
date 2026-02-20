@@ -73,9 +73,11 @@ CREATE TABLE IF NOT EXISTS batch_steps (
 -- Audit logs table
 CREATE TABLE IF NOT EXISTS audit_logs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  entity_type VARCHAR(50),             -- 'batch' | 'recipe' | 'user' | 'session'
+  entity_id   UUID,                    -- ID of the affected entity
   batch_id UUID REFERENCES batches(id),
   step_id UUID REFERENCES batch_steps(id),
-  action VARCHAR(100) NOT NULL,
+  action VARCHAR(100) NOT NULL,        -- dot-notation event code e.g. 'batch.created'
   performed_by VARCHAR(255),
   details JSONB,
   ip_address VARCHAR(45),

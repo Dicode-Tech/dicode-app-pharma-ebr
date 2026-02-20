@@ -1,5 +1,6 @@
 const pool = require('../config/database');
 const { authenticate, requireRole } = require('../middleware/auth');
+const { logEvent, getIp } = require('../utils/audit');
 
 const allRoles = [authenticate];
 const editors = [authenticate, requireRole('admin', 'batch_manager')];
@@ -148,6 +149,15 @@ async function routes(fastify) {
   </RecipeBody>
 </BatchML>`;
 
+      await logEvent({
+        action: 'recipe.exported',
+        entity_type: 'recipe',
+        entity_id: recipe.id,
+        performed_by: request.user.full_name,
+        ip_address: getIp(request),
+        details: { name: recipe.name, format: 'xml' },
+      });
+
       reply.header('Content-Type', 'application/xml');
       reply.header('Content-Disposition', `attachment; filename="${safeName}.xml"`);
       return reply.send(xml);
@@ -176,6 +186,15 @@ async function routes(fastify) {
       },
     };
 
+    await logEvent({
+      action: 'recipe.exported',
+      entity_type: 'recipe',
+      entity_id: recipe.id,
+      performed_by: request.user.full_name,
+      ip_address: getIp(request),
+      details: { name: recipe.name, format: 'json' },
+    });
+
     reply.header('Content-Disposition', `attachment; filename="${safeName}.json"`);
     return reply.send(payload);
   });
@@ -196,6 +215,16 @@ async function routes(fastify) {
       const recipe = rows[0];
       await insertSteps(client, recipe.id, steps);
       await client.query('COMMIT');
+
+      await logEvent({
+        action: 'recipe.created',
+        entity_type: 'recipe',
+        entity_id: recipe.id,
+        performed_by: created_by,
+        ip_address: getIp(request),
+        details: { name: recipe.name, product_name: recipe.product_name, version: recipe.version, step_count: steps.length },
+      });
+
       return reply.status(201).send(recipe);
     } catch (err) {
       await client.query('ROLLBACK');
@@ -242,6 +271,16 @@ async function routes(fastify) {
       const recipe = rows[0];
       await insertSteps(client, recipe.id, parsed.steps);
       await client.query('COMMIT');
+
+      await logEvent({
+        action: 'recipe.imported',
+        entity_type: 'recipe',
+        entity_id: recipe.id,
+        performed_by: created_by,
+        ip_address: getIp(request),
+        details: { name: recipe.name, product_name: recipe.product_name, format, step_count: parsed.steps.length },
+      });
+
       return reply.status(201).send(recipe);
     } catch (err) {
       await client.query('ROLLBACK');
@@ -277,6 +316,16 @@ async function routes(fastify) {
         await insertSteps(client, request.params.id, steps);
       }
       await client.query('COMMIT');
+
+      await logEvent({
+        action: 'recipe.updated',
+        entity_type: 'recipe',
+        entity_id: request.params.id,
+        performed_by: request.user.full_name,
+        ip_address: getIp(request),
+        details: { name: rows[0].name, version: rows[0].version, step_count: Array.isArray(steps) ? steps.length : undefined },
+      });
+
       return rows[0];
     } catch (err) {
       await client.query('ROLLBACK');
@@ -288,6 +337,11 @@ async function routes(fastify) {
 
   // DELETE /:id - delete recipe
   fastify.delete('/:id', { preHandler: editors }, async (request, reply) => {
+    // Fetch name before deleting for the audit log
+    const { rows: existing } = await pool.query('SELECT name, product_name FROM recipes WHERE id = $1', [request.params.id]);
+    if (!existing.length) {
+      return reply.status(404).send({ success: false, error: 'Recipe not found' });
+    }
     const { rowCount } = await pool.query(
       'DELETE FROM recipes WHERE id = $1',
       [request.params.id]
@@ -295,6 +349,14 @@ async function routes(fastify) {
     if (!rowCount) {
       return reply.status(404).send({ success: false, error: 'Recipe not found' });
     }
+    await logEvent({
+      action: 'recipe.deleted',
+      entity_type: 'recipe',
+      entity_id: request.params.id,
+      performed_by: request.user.full_name,
+      ip_address: getIp(request),
+      details: { name: existing[0].name, product_name: existing[0].product_name },
+    });
     return reply.status(204).send();
   });
 }

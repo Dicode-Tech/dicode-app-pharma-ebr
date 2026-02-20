@@ -1,6 +1,6 @@
 import axios from 'axios';
 import type {
-  Batch, BatchStep, Recipe, AuditLogEntry,
+  Batch, BatchStep, Recipe, AuditLogEntry, AuditEntityType,
   CreateBatchRequest, UpdateStepRequest, SignStepRequest,
   OpcReading, Equipment, Alarm,
   AuthUser, UserRecord,
@@ -133,6 +133,13 @@ export const recipeService = {
 
   importRecipe: (payload: { format: 'json' | 'xml'; data: unknown }): Promise<Recipe> =>
     api.post('/recipes/import', payload).then((r) => r.data),
+};
+
+// ─── Audit ───────────────────────────────────────────────────────────────────
+
+export const auditService = {
+  getAll: (params?: { entity_type?: AuditEntityType; limit?: number; offset?: number }): Promise<AuditLogEntry[]> =>
+    api.get('/audit', { params }).then((r) => r.data),
 };
 
 // ─── Integrations ────────────────────────────────────────────────────────────

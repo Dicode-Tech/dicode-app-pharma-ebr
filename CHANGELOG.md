@@ -6,6 +6,50 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.6.0] — 2026-02-20
+
+### Added — Backend
+
+- **`backend/src/utils/audit.js`** — shared `logEvent(opts)` and `getIp(request)` helpers; all route handlers now call this instead of writing raw `INSERT INTO audit_logs` SQL
+- **`backend/src/routes/audit.js`** — new dedicated `GET /api/v1/audit` endpoint with `entity_type` filter and `limit`/`offset` pagination; query enriches rows with `entity_name` (batch number, recipe name, or user full name) via left joins
+- **`backend/database/schema.sql`** — `audit_logs` extended with `entity_type VARCHAR(50)` and `entity_id UUID` columns for entity-agnostic event linking
+- **`backend/scripts/migrate-audit-v2.js`** — idempotent migration that adds the new columns, backfills `entity_type`/`entity_id` from existing batch rows, normalises legacy action strings to dot-notation, and creates synthetic historical entries for pre-existing recipes, users, and batches
+- **Standardised event code taxonomy** — dot-notation format (`entity.verb`) applied to all new and existing events:
+
+| Category | Event codes |
+|---|---|
+| Batch | `batch.created` `batch.started` `batch.completed` `batch.cancelled` `batch.report.generated` |
+| Batch Step | `batch.step.started` `batch.step.completed` `batch.step.skipped` `batch.step.signed` |
+| Recipe | `recipe.created` `recipe.updated` `recipe.deleted` `recipe.imported` `recipe.exported` |
+| User | `user.created` `user.updated` `user.deactivated` |
+| Session | `auth.login` `auth.logout` `auth.login.failed` |
+
+- **Recipe audit events** (`src/routes/recipes.js`) — `recipe.created`, `recipe.updated`, `recipe.deleted`, `recipe.imported`, `recipe.exported` logged on every mutating operation and on export (significant for 21 CFR Part 11 traceability)
+- **User management audit events** (`src/routes/users.js`) — `user.created` (details: email, role), `user.updated` (details: changed field names only — no passwords or values), `user.deactivated` (details: email, full name)
+- **Session audit events** (`src/routes/auth.js`) — `auth.login` on successful login (details: email, role), `auth.logout` on explicit sign-out, `auth.login.failed` on bad credentials (details: attempted email); logout route now requires authentication so the JWT user identity is captured
+- **IP address capture** — `getIp()` reads `X-Forwarded-For` header (proxy-aware) or falls back to `request.ip`; every `logEvent()` call now passes the client IP
+
+### Changed — Backend
+
+- **`src/routes/batches.js`** — all `INSERT INTO audit_logs` replaced with `logEvent()` calls; action strings updated to dot-notation; `entity_type: 'batch'` and `entity_id` added to all events; `ip_address` captured on every event; `batch.report.generated` event added (was not logged previously)
+- **`src/index.js`** — registered new `/api/v1/audit` route
+
+### Added — Frontend
+
+- **Category filter tabs** on `AuditTrail` page — All / Batches / Recipes / Users / Sessions; each tab calls the new `/audit?entity_type=` endpoint
+- **Category badge + icon column** — shows entity type at a glance (FlaskConical for batch, BookOpen for recipe, Users for user, LogIn for session)
+- **Entity column** — links directly to the affected batch (`/batches/:id`) or recipe (`/recipes/:id`); shows name for user/session events
+- **IP Address column** — now visible in the audit table
+- **"Load more" pagination** — 50 events per page with a Load More button; replaces the previous hardcoded 100-row limit
+- **Color coding by category and action** — batch events in blue, recipe in indigo, user in amber, session in green; `auth.login.failed`, `batch.cancelled`, `recipe.deleted`, `user.deactivated` in red; `batch.step.signed` in purple
+
+### Changed — Frontend
+
+- **`src/types/index.ts`** — added `AuditEntityType` union type; extended `AuditLogEntry` with `entity_type`, `entity_id`, `entity_name` fields
+- **`src/services/api.ts`** — added `auditService.getAll(params)` targeting the new `/audit` endpoint; `batchService.getBatchAuditLog` kept for the BatchDetail page batch-specific view
+
+---
+
 ## [0.5.0] — 2026-02-20
 
 ### Added — Backend

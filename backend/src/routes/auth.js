@@ -2,6 +2,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const pool = require('../config/database');
 const { authenticate, JWT_SECRET } = require('../middleware/auth');
+const { logEvent, getIp } = require('../utils/audit');
 
 async function routes(fastify) {
   // POST /login
@@ -17,12 +18,24 @@ async function routes(fastify) {
     );
 
     if (!rows.length) {
+      await logEvent({
+        action: 'auth.login.failed',
+        entity_type: 'session',
+        ip_address: getIp(request),
+        details: { email: email.toLowerCase().trim() },
+      });
       return reply.status(401).send({ success: false, error: 'Invalid credentials' });
     }
 
     const user = rows[0];
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) {
+      await logEvent({
+        action: 'auth.login.failed',
+        entity_type: 'session',
+        ip_address: getIp(request),
+        details: { email: user.email },
+      });
       return reply.status(401).send({ success: false, error: 'Invalid credentials' });
     }
 
@@ -37,11 +50,28 @@ async function routes(fastify) {
       maxAge: 86400,
     });
 
+    await logEvent({
+      action: 'auth.login',
+      entity_type: 'session',
+      entity_id: user.id,
+      performed_by: user.full_name,
+      ip_address: getIp(request),
+      details: { email: user.email, role: user.role },
+    });
+
     return { id: user.id, email: user.email, full_name: user.full_name, role: user.role };
   });
 
   // POST /logout
-  fastify.post('/logout', async (request, reply) => {
+  fastify.post('/logout', { preHandler: [authenticate] }, async (request, reply) => {
+    await logEvent({
+      action: 'auth.logout',
+      entity_type: 'session',
+      entity_id: request.user.id,
+      performed_by: request.user.full_name,
+      ip_address: getIp(request),
+      details: { email: request.user.email },
+    });
     reply.clearCookie('token', { path: '/' });
     return { success: true };
   });

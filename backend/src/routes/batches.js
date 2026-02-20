@@ -1,53 +1,54 @@
 const pool = require('../config/database');
 const { authenticate, requireRole } = require('../middleware/auth');
+const { logEvent, getIp } = require('../utils/audit');
 
 const allRoles = [authenticate];
-const writers = [authenticate, requireRole('admin', 'batch_manager', 'operator_supervisor', 'operator')];
+const writers  = [authenticate, requireRole('admin', 'batch_manager', 'operator_supervisor', 'operator')];
 const managers = [authenticate, requireRole('admin', 'batch_manager', 'operator_supervisor')];
 
 async function routes(fastify) {
-  // GET / - list all batches with step progress
-  fastify.get('/', { preHandler: allRoles }, async (request, reply) => {
-    const { rows } = await pool.query(`
-      SELECT b.*,
-        COUNT(bs.id)::int AS total_steps,
-        COUNT(bs.id) FILTER (WHERE bs.status = 'completed')::int AS completed_steps
-      FROM batches b
-      LEFT JOIN batch_steps bs ON bs.batch_id = b.id
-      GROUP BY b.id
-      ORDER BY b.created_at DESC
-    `);
+  // GET / - list all batches
+  fastify.get('/', { preHandler: allRoles }, async () => {
+    const { rows } = await pool.query(
+      `SELECT b.*,
+              COUNT(bs.id) AS total_steps,
+              COUNT(bs.id) FILTER (WHERE bs.status IN ('completed', 'skipped')) AS completed_steps
+       FROM batches b
+       LEFT JOIN batch_steps bs ON bs.batch_id = b.id
+       GROUP BY b.id
+       ORDER BY b.created_at DESC`
+    );
     return rows;
   });
 
-  // GET /:id - get single batch with step progress
+  // GET /:id - get single batch
   fastify.get('/:id', { preHandler: allRoles }, async (request, reply) => {
-    const { rows } = await pool.query(`
-      SELECT b.*,
-        COUNT(bs.id)::int AS total_steps,
-        COUNT(bs.id) FILTER (WHERE bs.status = 'completed')::int AS completed_steps
-      FROM batches b
-      LEFT JOIN batch_steps bs ON bs.batch_id = b.id
-      WHERE b.id = $1
-      GROUP BY b.id
-    `, [request.params.id]);
+    const { rows } = await pool.query(
+      `SELECT b.*,
+              COUNT(bs.id) AS total_steps,
+              COUNT(bs.id) FILTER (WHERE bs.status IN ('completed', 'skipped')) AS completed_steps
+       FROM batches b
+       LEFT JOIN batch_steps bs ON bs.batch_id = b.id
+       WHERE b.id = $1
+       GROUP BY b.id`,
+      [request.params.id]
+    );
     if (!rows.length) {
       return reply.status(404).send({ success: false, error: 'Batch not found' });
     }
     return rows[0];
   });
 
-  // POST / - create batch, copy steps from recipe if provided
+  // POST / - create batch
   fastify.post('/', { preHandler: writers }, async (request, reply) => {
     const { batch_number, product_name, batch_size, recipe_id } = request.body;
     const created_by = request.user.full_name;
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-
       const { rows } = await client.query(
-        `INSERT INTO batches (batch_number, product_name, batch_size, created_by, status, recipe_id)
-         VALUES ($1, $2, $3, $4, 'draft', $5)
+        `INSERT INTO batches (batch_number, product_name, batch_size, created_by, recipe_id)
+         VALUES ($1, $2, $3, $4, $5)
          RETURNING *`,
         [batch_number, product_name, batch_size, created_by, recipe_id || null]
       );
@@ -67,12 +68,18 @@ async function routes(fastify) {
         }
       }
 
-      await client.query(
-        `INSERT INTO audit_logs (batch_id, action, performed_by, details) VALUES ($1, 'batch_created', $2, $3)`,
-        [batch.id, created_by, JSON.stringify({ batch_number })]
-      );
-
       await client.query('COMMIT');
+
+      await logEvent({
+        action: 'batch.created',
+        entity_type: 'batch',
+        entity_id: batch.id,
+        batch_id: batch.id,
+        performed_by: created_by,
+        ip_address: getIp(request),
+        details: { batch_number },
+      });
+
       return reply.status(201).send(batch);
     } catch (err) {
       await client.query('ROLLBACK');
@@ -93,10 +100,15 @@ async function routes(fastify) {
     if (!rows.length) {
       return reply.status(404).send({ success: false, error: 'Batch not found or already started' });
     }
-    await pool.query(
-      `INSERT INTO audit_logs (batch_id, action, performed_by, details) VALUES ($1, 'start', $2, $3)`,
-      [request.params.id, performed_by, JSON.stringify({ batch_number: rows[0].batch_number })]
-    );
+    await logEvent({
+      action: 'batch.started',
+      entity_type: 'batch',
+      entity_id: request.params.id,
+      batch_id: request.params.id,
+      performed_by,
+      ip_address: getIp(request),
+      details: { batch_number: rows[0].batch_number },
+    });
     return rows[0];
   });
 
@@ -111,10 +123,15 @@ async function routes(fastify) {
     if (!rows.length) {
       return reply.status(404).send({ success: false, error: 'Batch not found or not active' });
     }
-    await pool.query(
-      `INSERT INTO audit_logs (batch_id, action, performed_by, details) VALUES ($1, 'complete', $2, $3)`,
-      [request.params.id, performed_by, JSON.stringify({ batch_number: rows[0].batch_number })]
-    );
+    await logEvent({
+      action: 'batch.completed',
+      entity_type: 'batch',
+      entity_id: request.params.id,
+      batch_id: request.params.id,
+      performed_by,
+      ip_address: getIp(request),
+      details: { batch_number: rows[0].batch_number },
+    });
     return rows[0];
   });
 
@@ -130,15 +147,20 @@ async function routes(fastify) {
     if (!rows.length) {
       return reply.status(404).send({ success: false, error: 'Batch not found or already completed' });
     }
-    await pool.query(
-      `INSERT INTO audit_logs (batch_id, action, performed_by, details) VALUES ($1, 'cancel', $2, $3)`,
-      [request.params.id, performed_by, JSON.stringify({ reason: reason || 'No reason provided' })]
-    );
+    await logEvent({
+      action: 'batch.cancelled',
+      entity_type: 'batch',
+      entity_id: request.params.id,
+      batch_id: request.params.id,
+      performed_by,
+      ip_address: getIp(request),
+      details: { reason: reason || 'No reason provided' },
+    });
     return rows[0];
   });
 
   // GET /:id/steps
-  fastify.get('/:id/steps', { preHandler: allRoles }, async (request, reply) => {
+  fastify.get('/:id/steps', { preHandler: allRoles }, async (request) => {
     const { rows } = await pool.query(
       'SELECT * FROM batch_steps WHERE batch_id = $1 ORDER BY step_number',
       [request.params.id]
@@ -167,10 +189,21 @@ async function routes(fastify) {
       return reply.status(404).send({ success: false, error: 'Step not found' });
     }
     const step = rows[0];
-    await pool.query(
-      `INSERT INTO audit_logs (batch_id, step_id, action, performed_by, details) VALUES ($1, $2, $3, $4, $5)`,
-      [request.params.id, step.id, `step_${status}`, performed_by, JSON.stringify({ step_number: step.step_number, description: step.description, actual_value })]
-    );
+    const actionMap = {
+      in_progress: 'batch.step.started',
+      completed:   'batch.step.completed',
+      skipped:     'batch.step.skipped',
+    };
+    await logEvent({
+      action: actionMap[status] || `batch.step.${status}`,
+      entity_type: 'batch',
+      entity_id: request.params.id,
+      batch_id: request.params.id,
+      step_id: step.id,
+      performed_by,
+      ip_address: getIp(request),
+      details: { step_number: step.step_number, description: step.description, actual_value },
+    });
     return step;
   });
 
@@ -195,15 +228,21 @@ async function routes(fastify) {
       return reply.status(404).send({ success: false, error: 'Step not found' });
     }
     const step = rows[0];
-    await pool.query(
-      `INSERT INTO audit_logs (batch_id, step_id, action, performed_by, details) VALUES ($1, $2, 'step_signed', $3, $4)`,
-      [request.params.id, step.id, performed_by, JSON.stringify({ step_number: step.step_number, description: step.description, actual_value })]
-    );
+    await logEvent({
+      action: 'batch.step.signed',
+      entity_type: 'batch',
+      entity_id: request.params.id,
+      batch_id: request.params.id,
+      step_id: step.id,
+      performed_by,
+      ip_address: getIp(request),
+      details: { step_number: step.step_number, description: step.description, actual_value },
+    });
     return step;
   });
 
-  // GET /:id/audit - audit trail for a specific batch
-  fastify.get('/:id/audit', { preHandler: allRoles }, async (request, reply) => {
+  // GET /:id/audit - audit trail for a specific batch (kept for BatchDetail page)
+  fastify.get('/:id/audit', { preHandler: allRoles }, async (request) => {
     const { rows } = await pool.query(
       `SELECT al.*, bs.step_number, bs.description AS step_description
        FROM audit_logs al
@@ -215,9 +254,9 @@ async function routes(fastify) {
     return rows;
   });
 
-  // GET /audit/all - global audit trail
-  fastify.get('/audit/all', { preHandler: allRoles }, async (request, reply) => {
-    const limit = parseInt(request.query.limit) || 100;
+  // GET /audit/all - legacy global audit trail (kept for backward compat)
+  fastify.get('/audit/all', { preHandler: allRoles }, async (request) => {
+    const limit  = parseInt(request.query.limit)  || 100;
     const offset = parseInt(request.query.offset) || 0;
     const { rows } = await pool.query(
       `SELECT al.*, b.batch_number, bs.step_number, bs.description AS step_description
@@ -250,36 +289,44 @@ async function routes(fastify) {
     );
 
     const pdfGenerator = require('../services/pdf-generator');
-    const filePath = await pdfGenerator.generate(batch, steps, auditLogs);
+    const reportPath = await pdfGenerator.generateBatchReport({ batch, steps, auditLogs, generatedBy: generated_by });
 
-    const { rows: reportRows } = await pool.query(
-      `INSERT INTO pdf_reports (batch_id, file_path, generated_by) VALUES ($1, $2, $3) RETURNING id`,
-      [batch.id, filePath, generated_by]
+    await pool.query(
+      'INSERT INTO pdf_reports (batch_id, file_path, generated_by) VALUES ($1, $2, $3)',
+      [batch.id, reportPath, generated_by]
     );
 
-    return { success: true, reportId: reportRows[0].id };
+    await logEvent({
+      action: 'batch.report.generated',
+      entity_type: 'batch',
+      entity_id: batch.id,
+      batch_id: batch.id,
+      performed_by: generated_by,
+      ip_address: getIp(request),
+      details: { batch_number: batch.batch_number },
+    });
+
+    return { success: true, reportId: batch.id };
   });
 
-  // GET /:id/report/download - stream PDF
+  // GET /:id/report/download - download PDF report
   fastify.get('/:id/report/download', { preHandler: allRoles }, async (request, reply) => {
     const { rows } = await pool.query(
       'SELECT * FROM pdf_reports WHERE batch_id = $1 ORDER BY created_at DESC LIMIT 1',
       [request.params.id]
     );
-    if (!rows.length) return reply.status(404).send({ success: false, error: 'No report found. Generate one first.' });
-
-    const fs = require('fs');
-    const path = require('path');
-    const filePath = path.join(__dirname, '../../', rows[0].file_path);
-
-    if (!fs.existsSync(filePath)) {
-      return reply.status(404).send({ success: false, error: 'PDF file not found on disk.' });
+    if (!rows.length) {
+      return reply.status(404).send({ success: false, error: 'No report found for this batch' });
     }
-
-    const stream = fs.createReadStream(filePath);
-    reply.type('application/pdf');
-    reply.header('Content-Disposition', `attachment; filename="batch-record-${request.params.id}.pdf"`);
-    return reply.send(stream);
+    const fs = require('fs');
+    const filePath = rows[0].file_path;
+    if (!fs.existsSync(filePath)) {
+      return reply.status(404).send({ success: false, error: 'Report file not found on disk' });
+    }
+    const fileName = `batch-record-${request.params.id}.pdf`;
+    reply.header('Content-Type', 'application/pdf');
+    reply.header('Content-Disposition', `attachment; filename="${fileName}"`);
+    return reply.send(fs.createReadStream(filePath));
   });
 }
 

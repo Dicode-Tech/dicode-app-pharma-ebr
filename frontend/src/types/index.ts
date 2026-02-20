@@ -58,8 +58,13 @@ export interface RecipeStep {
   duration_minutes?: number;
 }
 
+export type AuditEntityType = 'batch' | 'recipe' | 'user' | 'session';
+
 export interface AuditLogEntry {
   id: string;
+  entity_type?: AuditEntityType;
+  entity_id?: string;
+  entity_name?: string;   // enriched by backend: batch_number, recipe name, user full_name, etc.
   batch_id?: string;
   batch_number?: string;
   step_id?: string;
