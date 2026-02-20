@@ -1,258 +1,232 @@
 import { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { Layout } from '../components/Layout';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
+import { StepCard } from '../components/StepCard';
 import { batchService } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import type { Batch, BatchStep } from '../types';
-import { ArrowLeft, Play, CheckCircle, XCircle, User, Calendar } from 'lucide-react';
+import {
+  ArrowLeft, Play, CheckCircle, XCircle,
+  FileDown, Loader2, ShieldCheck, ClipboardList,
+} from 'lucide-react';
 
 export function BatchDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [batch, setBatch] = useState<Batch | null>(null);
   const [steps, setSteps] = useState<BatchStep[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [generatingPdf, setGeneratingPdf] = useState(false);
+  const [pdfReady, setPdfReady] = useState(false);
 
   useEffect(() => {
-    if (id) {
-      loadBatch(id);
-      loadSteps(id);
-    }
+    if (id) loadAll(id);
   }, [id]);
 
-  const loadBatch = async (batchId: string) => {
+  async function loadAll(batchId: string) {
     try {
-      const data = await batchService.getBatch(batchId);
-      setBatch(data);
-    } catch (err) {
+      const [batchData, stepsData] = await Promise.all([
+        batchService.getBatch(batchId),
+        batchService.getBatchSteps(batchId),
+      ]);
+      setBatch(batchData);
+      setSteps(stepsData);
+    } catch {
       setError('Failed to load batch');
-    }
-  };
-
-  const loadSteps = async (batchId: string) => {
-    try {
-      const data = await batchService.getBatchSteps(batchId);
-      setSteps(data);
-    } catch (err) {
-      console.error('Failed to load steps');
     } finally {
       setLoading(false);
     }
-  };
+  }
 
-  const handleStart = async () => {
+  async function handleStart() {
     if (!id) return;
-    try {
-      await batchService.startBatch(id, 'current-user');
-      loadBatch(id);
-    } catch (err) {
-      alert('Failed to start batch');
-    }
-  };
+    try { await batchService.startBatch(id); loadAll(id); }
+    catch { alert('Failed to start batch'); }
+  }
 
-  const handleComplete = async () => {
+  async function handleComplete() {
     if (!id) return;
-    try {
-      await batchService.completeBatch(id, 'current-user');
-      loadBatch(id);
-    } catch (err) {
-      alert('Failed to complete batch');
-    }
-  };
+    const pending = steps.filter(s => s.status === 'pending' || s.status === 'in_progress').length;
+    if (pending > 0 && !confirm(`${pending} step(s) not yet completed. Complete batch anyway?`)) return;
+    try { await batchService.completeBatch(id); loadAll(id); }
+    catch { alert('Failed to complete batch'); }
+  }
 
-  const handleCancel = async () => {
+  async function handleCancel() {
     if (!id) return;
-    if (!confirm('Are you sure you want to cancel this batch?')) return;
-    try {
-      await batchService.cancelBatch(id, 'current-user');
-      loadBatch(id);
-    } catch (err) {
-      alert('Failed to cancel batch');
-    }
-  };
+    if (!confirm('Cancel this batch? This cannot be undone.')) return;
+    try { await batchService.cancelBatch(id, 'Cancelled by operator'); loadAll(id); }
+    catch { alert('Failed to cancel batch'); }
+  }
+
+  async function handleStepStart(stepId: string) {
+    if (!id) return;
+    const updated = await batchService.updateStep(id, stepId, {
+      status: 'in_progress',
+      performed_by: user?.full_name ?? '',
+    });
+    setSteps(prev => prev.map(s => s.id === stepId ? updated : s));
+  }
+
+  async function handleStepComplete(stepId: string, data: { notes?: string; actual_value?: number }) {
+    if (!id) return;
+    const updated = await batchService.updateStep(id, stepId, {
+      status: 'completed',
+      performed_by: user?.full_name ?? '',
+      ...data,
+    });
+    setSteps(prev => prev.map(s => s.id === stepId ? updated : s));
+  }
+
+  async function handleStepSign(stepId: string, data: { signature_data: string; notes?: string; actual_value?: number }) {
+    if (!id) return;
+    const updated = await batchService.signStep(id, stepId, {
+      performed_by: user?.full_name ?? '',
+      ...data,
+    });
+    setSteps(prev => prev.map(s => s.id === stepId ? updated : s));
+  }
+
+  async function handleGenerateReport() {
+    if (!id) return;
+    setGeneratingPdf(true);
+    try { await batchService.generateReport(id); setPdfReady(true); }
+    catch { alert('Failed to generate report.'); }
+    finally { setGeneratingPdf(false); }
+  }
 
   const getStatusVariant = (status: Batch['status']) => {
-    switch (status) {
-      case 'active':
-        return 'info';
-      case 'completed':
-        return 'success';
-      case 'cancelled':
-        return 'danger';
-      default:
-        return 'default';
-    }
+    const map = { active: 'info', completed: 'success', cancelled: 'danger', draft: 'default' } as const;
+    return map[status] ?? 'default';
   };
 
-  const getStepStatusVariant = (status: BatchStep['status']) => {
-    switch (status) {
-      case 'completed':
-        return 'success';
-      case 'in_progress':
-        return 'info';
-      case 'skipped':
-        return 'warning';
-      default:
-        return 'default';
-    }
-  };
+  const completedCount = steps.filter(s => s.status === 'completed' || s.status === 'skipped').length;
+  const progressPct = steps.length ? Math.round((completedCount / steps.length) * 100) : 0;
 
-  if (loading) {
-    return (
-      <Layout>
-        <div className="flex justify-center items-center h-64">
-          <div className="text-gray-500">Loading...</div>
-        </div>
-      </Layout>
-    );
-  }
+  if (loading) return (
+    <Layout>
+      <div className="flex justify-center items-center h-64">
+        <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
+      </div>
+    </Layout>
+  );
 
-  if (error || !batch) {
-    return (
-      <Layout>
-        <div className="text-center py-12">
-          <p className="text-red-500 mb-4">{error || 'Batch not found'}</p>
-          <Button onClick={() => navigate('/batches')}>Back to Batches</Button>
-        </div>
-      </Layout>
-    );
-  }
+  if (error || !batch) return (
+    <Layout>
+      <div className="text-center py-12">
+        <p className="text-red-500 mb-4">{error || 'Batch not found'}</p>
+        <Button onClick={() => navigate('/batches')}>Back to Batches</Button>
+      </div>
+    </Layout>
+  );
 
   return (
     <Layout>
       <div className="space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center">
-            <button
-              onClick={() => navigate('/batches')}
-              className="mr-4 text-gray-500 hover:text-gray-700"
-            >
+            <button onClick={() => navigate('/batches')} className="mr-4 text-gray-500 hover:text-gray-700">
               <ArrowLeft className="w-5 h-5" />
             </button>
             <div>
-              <h2 className="text-2xl font-bold text-gray-900">
-                Batch {batch.batch_number}
-              </h2>
-              <p className="text-gray-500">{batch.product_name}</p>
+              <div className="flex items-center gap-3">
+                <h2 className="text-2xl font-bold text-gray-900">Batch {batch.batch_number}</h2>
+                <Badge variant={getStatusVariant(batch.status)}>{batch.status}</Badge>
+              </div>
+              <p className="text-gray-500">{batch.product_name} — {batch.batch_size.toLocaleString()} kg</p>
             </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             {batch.status === 'draft' && (
               <Button onClick={handleStart} variant="outline">
-                <Play className="w-4 h-4 mr-2" />
-                Start Batch
+                <Play className="w-4 h-4 mr-2" />Start Batch
               </Button>
             )}
             {batch.status === 'active' && (
               <Button onClick={handleComplete}>
-                <CheckCircle className="w-4 h-4 mr-2" />
-                Complete
+                <CheckCircle className="w-4 h-4 mr-2" />Complete Batch
               </Button>
             )}
             {(batch.status === 'draft' || batch.status === 'active') && (
               <Button onClick={handleCancel} variant="danger">
-                <XCircle className="w-4 h-4 mr-2" />
-                Cancel
+                <XCircle className="w-4 h-4 mr-2" />Cancel
               </Button>
             )}
+            {batch.status === 'completed' && (
+              pdfReady ? (
+                <Button onClick={() => window.open(batchService.getReportDownloadUrl(id!), '_blank')}>
+                  <FileDown className="w-4 h-4 mr-2" />Download PDF
+                </Button>
+              ) : (
+                <Button onClick={handleGenerateReport} disabled={generatingPdf} variant="outline">
+                  {generatingPdf
+                    ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Generating...</>
+                    : <><FileDown className="w-4 h-4 mr-2" />Generate Report</>}
+                </Button>
+              )
+            )}
+            <Link to={`/audit?batch=${id}`}>
+              <Button variant="outline">
+                <ShieldCheck className="w-4 h-4 mr-2" />Audit Trail
+              </Button>
+            </Link>
           </div>
         </div>
 
-        {/* Batch Info Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="bg-white p-4 rounded-lg shadow-sm border">
-            <p className="text-sm text-gray-500">Status</p>
-            <Badge variant={getStatusVariant(batch.status)} className="mt-1">
-              {batch.status}
-            </Badge>
-          </div>
-          <div className="bg-white p-4 rounded-lg shadow-sm border">
-            <p className="text-sm text-gray-500">Batch Size</p>
-            <p className="text-lg font-semibold">{batch.batch_size.toLocaleString()} units</p>
-          </div>
-          <div className="bg-white p-4 rounded-lg shadow-sm border">
-            <p className="text-sm text-gray-500">Created By</p>
-            <p className="text-lg font-semibold">{batch.created_by}</p>
-          </div>
-          <div className="bg-white p-4 rounded-lg shadow-sm border">
-            <p className="text-sm text-gray-500">Created</p>
-            <p className="text-lg font-semibold">
-              {new Date(batch.created_at).toLocaleDateString()}
-            </p>
-          </div>
+        {/* Info Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[
+            { label: 'Created By', value: batch.created_by },
+            { label: 'Created', value: new Date(batch.created_at).toLocaleDateString() },
+            { label: 'Started', value: batch.started_at ? new Date(batch.started_at).toLocaleDateString() : '—' },
+            { label: 'Completed', value: batch.completed_at ? new Date(batch.completed_at).toLocaleDateString() : '—' },
+          ].map(({ label, value }) => (
+            <div key={label} className="bg-white p-4 rounded-lg shadow-sm border">
+              <p className="text-xs text-gray-500 uppercase font-medium mb-1">{label}</p>
+              <p className="font-semibold">{value}</p>
+            </div>
+          ))}
         </div>
+
+        {/* Step Progress */}
+        {steps.length > 0 && (
+          <div className="bg-white rounded-lg shadow-sm border p-4">
+            <div className="flex justify-between text-sm mb-2">
+              <span className="font-medium text-gray-700 flex items-center gap-1">
+                <ClipboardList className="w-4 h-4" />Step Progress
+              </span>
+              <span className="text-gray-500">{completedCount} / {steps.length} ({progressPct}%)</span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-3">
+              <div className="bg-green-500 h-3 rounded-full transition-all duration-500" style={{ width: `${progressPct}%` }} />
+            </div>
+          </div>
+        )}
 
         {/* Steps */}
-        <div className="bg-white rounded-lg shadow-sm border">
-          <div className="px-6 py-4 border-b">
-            <h3 className="text-lg font-semibold text-gray-900">Production Steps</h3>
-          </div>
-          
+        <div className="space-y-3">
+          <h3 className="text-lg font-semibold text-gray-900">Production Steps</h3>
           {steps.length === 0 ? (
-            <div className="p-6 text-center text-gray-500">
-              No steps defined for this batch
+            <div className="bg-white rounded-lg shadow-sm border p-8 text-center text-gray-500">
+              No steps defined. Create this batch from a recipe to auto-generate steps.
             </div>
           ) : (
-            <div className="divide-y divide-gray-200">
-              {steps.map((step) => (
-                <div key={step.id} className="p-6 hover:bg-gray-50">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3">
-                        <span className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-sm font-medium text-gray-600">
-                          {step.step_number}
-                        </span>
-                        <h4 className="text-lg font-medium text-gray-900">
-                          {step.description}
-                        </h4>
-                      </div>
-                      
-                      <div className="mt-3 flex items-center gap-4 text-sm text-gray-500">
-                        <Badge variant={getStepStatusVariant(step.status)}>
-                          {step.status}
-                        </Badge>
-                        {step.performed_by && (
-                          <span className="flex items-center gap-1">
-                            <User className="w-4 h-4" />
-                            {step.performed_by}
-                          </span>
-                        )}
-                        {step.completed_at && (
-                          <span className="flex items-center gap-1">
-                            <Calendar className="w-4 h-4" />
-                            {new Date(step.completed_at).toLocaleString()}
-                          </span>
-                        )}
-                      </div>
-
-                      {step.notes && (
-                        <p className="mt-2 text-sm text-gray-600 bg-gray-50 p-2 rounded">
-                          {step.notes}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="ml-4">
-                      {step.status === 'pending' && batch.status === 'active' && (
-                        <Button size="sm">
-                          <Play className="w-4 h-4 mr-1" />
-                          Start
-                        </Button>
-                      )}
-                      {step.status === 'in_progress' && (
-                        <Button size="sm">
-                          <CheckCircle className="w-4 h-4 mr-1" />
-                          Complete
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
+            steps.map(step => (
+              <StepCard
+                key={step.id}
+                step={step}
+                batchStatus={batch.status}
+                operatorName={user?.full_name ?? ''}
+                onStart={handleStepStart}
+                onComplete={handleStepComplete}
+                onSign={handleStepSign}
+              />
+            ))
           )}
         </div>
       </div>

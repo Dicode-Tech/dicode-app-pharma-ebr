@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 11px; color: #1a1a1a; background: #fff; }
+  .page { padding: 20mm 18mm; }
+
+  /* Header */
+  .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #1e3a5f; padding-bottom: 12px; margin-bottom: 16px; }
+  .company-info h1 { font-size: 20px; color: #1e3a5f; font-weight: 800; letter-spacing: -0.5px; }
+  .company-info p { font-size: 9px; color: #666; margin-top: 2px; }
+  .doc-meta { text-align: right; }
+  .doc-meta .doc-title { font-size: 14px; font-weight: 700; color: #1e3a5f; }
+  .doc-meta table { margin-top: 6px; font-size: 9px; color: #555; }
+  .doc-meta td { padding: 1px 4px; }
+  .doc-meta td:first-child { font-weight: 600; color: #333; }
+
+  /* GMP banner */
+  .gmp-banner { background: #1e3a5f; color: white; text-align: center; padding: 5px; font-size: 9px; font-weight: 600; letter-spacing: 1px; margin-bottom: 16px; border-radius: 2px; }
+
+  /* Section */
+  .section { margin-bottom: 20px; }
+  .section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #1e3a5f; border-bottom: 1.5px solid #1e3a5f; padding-bottom: 4px; margin-bottom: 10px; }
+
+  /* Info grid */
+  .info-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .info-card { border: 1px solid #ddd; border-radius: 4px; padding: 8px; background: #f9fafb; }
+  .info-card .label { font-size: 8px; text-transform: uppercase; color: #888; font-weight: 600; margin-bottom: 3px; }
+  .info-card .value { font-size: 12px; font-weight: 700; color: #1a1a1a; }
+  .info-card .sub { font-size: 9px; color: #555; margin-top: 1px; }
+
+  /* Status badge */
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+  .badge-completed { background: #dcfce7; color: #166534; }
+  .badge-active { background: #dbeafe; color: #1e40af; }
+  .badge-draft { background: #f3f4f6; color: #374151; }
+  .badge-cancelled { background: #fee2e2; color: #991b1b; }
+
+  /* Steps table */
+  .steps-table { width: 100%; border-collapse: collapse; }
+  .steps-table th { background: #1e3a5f; color: white; padding: 7px 8px; text-align: left; font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; }
+  .steps-table td { padding: 7px 8px; border-bottom: 1px solid #e5e7eb; vertical-align: top; font-size: 10px; }
+  .steps-table tr:nth-child(even) td { background: #f9fafb; }
+  .steps-table .step-num { font-weight: 700; color: #1e3a5f; text-align: center; width: 30px; }
+  .steps-table .step-type-badge { font-size: 8px; padding: 1px 5px; border-radius: 8px; font-weight: 600; }
+  .type-measurement { background: #dbeafe; color: #1e40af; }
+  .type-verification { background: #fef9c3; color: #854d0e; }
+  .type-equipment_check { background: #f3e8ff; color: #6b21a8; }
+  .type-manual { background: #f3f4f6; color: #374151; }
+  .status-completed { color: #166534; font-weight: 600; }
+  .status-skipped { color: #d97706; font-weight: 600; }
+  .status-pending { color: #9ca3af; }
+  .measurement-cell { }
+  .measurement-cell .expected { font-size: 9px; color: #888; }
+  .measurement-cell .actual { font-weight: 700; color: #1a1a1a; }
+  .measurement-cell .actual.ok { color: #166534; }
+  .measurement-cell .actual.na { color: #9ca3af; }
+  .signature-img { max-height: 36px; max-width: 80px; border: 1px solid #ddd; border-radius: 2px; background: white; }
+  .no-sig { font-size: 9px; color: #9ca3af; font-style: italic; }
+
+  /* Audit table */
+  .audit-table { width: 100%; border-collapse: collapse; font-size: 9px; }
+  .audit-table th { background: #374151; color: white; padding: 5px 7px; text-align: left; }
+  .audit-table td { padding: 5px 7px; border-bottom: 1px solid #e5e7eb; }
+  .audit-table tr:nth-child(even) td { background: #f9fafb; }
+  .action-badge { display: inline-block; padding: 1px 6px; border-radius: 8px; font-weight: 600; font-size: 8px; }
+  .action-start { background: #dbeafe; color: #1e40af; }
+  .action-complete { background: #dcfce7; color: #166534; }
+  .action-cancel { background: #fee2e2; color: #991b1b; }
+  .action-step_signed { background: #f3e8ff; color: #6b21a8; }
+  .action-step_completed { background: #dcfce7; color: #166534; }
+  .action-batch_created { background: #f3f4f6; color: #374151; }
+  .action-step_in_progress { background: #fef9c3; color: #854d0e; }
+
+  /* Footer */
+  .footer { margin-top: 24px; border-top: 2px solid #1e3a5f; padding-top: 10px; display: flex; justify-content: space-between; align-items: center; }
+  .footer-text { font-size: 8px; color: #888; }
+  .footer-gmp { font-size: 9px; font-weight: 700; color: #1e3a5f; }
+
+  /* Signature block */
+  .sig-block { display: flex; gap: 20px; margin-top: 16px; }
+  .sig-line { flex: 1; }
+  .sig-line .sig-label { font-size: 9px; color: #555; margin-bottom: 30px; }
+  .sig-line .sig-underline { border-top: 1px solid #333; padding-top: 4px; font-size: 9px; color: #888; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="company-info">
+      <h1>DICODE EBR</h1>
+      <p>Electronic Batch Record System</p>
+      <p>GMP Compliant — 21 CFR Part 11</p>
+    </div>
+    <div class="doc-meta">
+      <div class="doc-title">ELECTRONIC BATCH RECORD</div>
+      <table>
+        <tr><td>Document No.:</td><td>EBR-{{batch.batch_number}}</td></tr>
+        <tr><td>Generated:</td><td>{{generated_at}}</td></tr>
+        <tr><td>System Version:</td><td>1.0.0</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- GMP Banner -->
+  <div class="gmp-banner">⚠ CONTROLLED DOCUMENT — ELECTRONIC BATCH RECORD — GMP COMPLIANT</div>
+
+  <!-- Batch Info -->
+  <div class="section">
+    <div class="section-title">Batch Identification</div>
+    <div class="info-grid">
+      <div class="info-card">
+        <div class="label">Batch Number</div>
+        <div class="value">{{batch.batch_number}}</div>
+        <div class="sub">Unique Identifier</div>
+      </div>
+      <div class="info-card">
+        <div class="label">Product</div>
+        <div class="value" style="font-size:10px">{{batch.product_name}}</div>
+        <div class="sub">Batch Size: {{batch.batch_size}} kg</div>
+      </div>
+      <div class="info-card">
+        <div class="label">Status</div>
+        <div class="value"><span class="badge badge-{{batch.status}}">{{batch.status}}</span></div>
+        <div class="sub">Final Status</div>
+      </div>
+      <div class="info-card">
+        <div class="label">Created By</div>
+        <div class="value" style="font-size:10px">{{batch.created_by}}</div>
+        <div class="sub">{{batch.created_at_fmt}}</div>
+      </div>
+      <div class="info-card">
+        <div class="label">Started</div>
+        <div class="value" style="font-size:10px">{{batch.started_at_fmt}}</div>
+      </div>
+      <div class="info-card">
+        <div class="label">Completed</div>
+        <div class="value" style="font-size:10px">{{batch.completed_at_fmt}}</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Steps -->
+  <div class="section">
+    <div class="section-title">Process Steps ({{steps_count}} total)</div>
+    <table class="steps-table">
+      <thead>
+        <tr>
+          <th style="width:35px">#</th>
+          <th style="width:80px">Type</th>
+          <th>Description</th>
+          <th style="width:100px">Expected / Actual</th>
+          <th style="width:80px">Performed By</th>
+          <th style="width:90px">Completed</th>
+          <th style="width:65px">Signature</th>
+          <th style="width:50px">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{#each steps}}
+        <tr>
+          <td class="step-num">{{step_number}}</td>
+          <td><span class="step-type-badge type-{{step_type}}">{{step_type}}</span></td>
+          <td>
+            <strong>{{description}}</strong>
+            {{#if notes}}<div style="font-size:9px;color:#555;margin-top:3px">Note: {{notes}}</div>{{/if}}
+          </td>
+          <td class="measurement-cell">
+            {{#if expected_value}}
+              <div class="expected">Expected: {{expected_value}} {{unit}}</div>
+              {{#if actual_value}}
+                <div class="actual ok">Actual: {{actual_value}} {{unit}}</div>
+              {{else}}
+                <div class="actual na">—</div>
+              {{/if}}
+            {{else}}
+              <span style="color:#9ca3af;font-size:9px">N/A</span>
+            {{/if}}
+          </td>
+          <td>{{#if performed_by}}{{performed_by}}{{else}}<span style="color:#9ca3af">—</span>{{/if}}</td>
+          <td>{{#if completed_at_fmt}}{{completed_at_fmt}}{{else}}<span style="color:#9ca3af">—</span>{{/if}}</td>
+          <td>
+            {{#if signature_data}}
+              <img class="signature-img" src="{{signature_data}}" alt="Signature">
+            {{else if requires_signature}}
+              <span class="no-sig">Required</span>
+            {{else}}
+              <span class="no-sig">N/A</span>
+            {{/if}}
+          </td>
+          <td class="status-{{status}}">{{status}}</td>
+        </tr>
+        {{/each}}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Audit Trail -->
+  <div class="section">
+    <div class="section-title">Audit Trail</div>
+    <table class="audit-table">
+      <thead>
+        <tr>
+          <th style="width:130px">Timestamp</th>
+          <th style="width:110px">Action</th>
+          <th style="width:100px">Performed By</th>
+          <th>Details</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{#each audit_logs}}
+        <tr>
+          <td>{{created_at_fmt}}</td>
+          <td><span class="action-badge action-{{action}}">{{action}}</span></td>
+          <td>{{#if performed_by}}{{performed_by}}{{else}}—{{/if}}</td>
+          <td>{{details_str}}</td>
+        </tr>
+        {{/each}}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- QA Approval Signatures -->
+  <div class="section">
+    <div class="section-title">Quality Approval</div>
+    <div class="sig-block">
+      <div class="sig-line">
+        <div class="sig-label">Batch Manager Sign-off</div>
+        <div class="sig-underline">Name &amp; Date</div>
+      </div>
+      <div class="sig-line">
+        <div class="sig-label">QA Manager Approval</div>
+        <div class="sig-underline">Name &amp; Date</div>
+      </div>
+      <div class="sig-line">
+        <div class="sig-label">Qualified Person (QP) Release</div>
+        <div class="sig-underline">Name, License No. &amp; Date</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <div class="footer-text">This document is an electronic batch record generated by Dicode EBR v1.0. Any printed copy is uncontrolled.</div>
+    <div class="footer-gmp">GMP • 21 CFR Part 11 • EU Annex 11</div>
+  </div>
+
+</div>
+</body>
+</html>

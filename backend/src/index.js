@@ -12,9 +12,12 @@ const fastify = require('fastify')({
 
 // Register plugins
 fastify.register(require('@fastify/cors'), {
-  origin: true,
-  credentials: true
+  origin: ['http://localhost:5173'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
 });
+
+fastify.register(require('@fastify/cookie'));
 
 // Health check endpoint
 fastify.get('/health', async () => {
@@ -26,6 +29,8 @@ fastify.get('/health', async () => {
 });
 
 // Register routes
+fastify.register(require('./routes/auth'), { prefix: '/api/v1/auth' });
+fastify.register(require('./routes/users'), { prefix: '/api/v1/users' });
 fastify.register(require('./routes/batches'), { prefix: '/api/v1/batches' });
 fastify.register(require('./routes/recipes'), { prefix: '/api/v1/recipes' });
 fastify.register(require('./routes/integrations'), { prefix: '/api/v1/integrations' });
