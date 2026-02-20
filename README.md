@@ -257,6 +257,10 @@ cd backend
 npm run build
 ```
 
+## 🗂️ Documentation
+
+- [Production Scheduling & Cross-Contamination Safeguards](docs/production-scheduling.md) — scope and API drafts for the planning module.
+
 ## 📄 License
 
 MIT License - see LICENSE file for details
