@@ -257,6 +257,10 @@ cd backend
 npm run build
 ```
 
+## 🗂️ Documentation
+
+- [Multi-Tenant & Client-Specific Deployments](docs/multi-tenant.md)
+
 ## 📄 License
 
 MIT License - see LICENSE file for details
