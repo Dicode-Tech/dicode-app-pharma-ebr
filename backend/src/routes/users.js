@@ -6,11 +6,16 @@ const { logEvent, getIp } = require('../utils/audit');
 const VALID_ROLES = ['admin', 'batch_manager', 'operator_supervisor', 'operator', 'qa_qc'];
 const adminOnly = [authenticate, requireRole('admin')];
 
+function tenantId(request) {
+  return request.tenant.id;
+}
+
 async function routes(fastify) {
-  // GET / - list all users
-  fastify.get('/', { preHandler: adminOnly }, async () => {
+  // GET / - list all users for tenant
+  fastify.get('/', { preHandler: adminOnly }, async (request) => {
     const { rows } = await pool.query(
-      'SELECT id, email, full_name, role, is_active, created_at FROM users ORDER BY created_at ASC'
+      'SELECT id, email, full_name, role, is_active, created_at FROM users WHERE tenant_id = $1 ORDER BY created_at ASC',
+      [tenantId(request)]
     );
     return rows;
   });
@@ -27,13 +32,14 @@ async function routes(fastify) {
     const password_hash = await bcrypt.hash(password, 10);
     try {
       const { rows } = await pool.query(
-        `INSERT INTO users (email, password_hash, full_name, role)
-         VALUES ($1, $2, $3, $4)
+        `INSERT INTO users (tenant_id, email, password_hash, full_name, role)
+         VALUES ($1, $2, $3, $4, $5)
          RETURNING id, email, full_name, role, is_active, created_at`,
-        [email.toLowerCase().trim(), password_hash, full_name, role]
+        [tenantId(request), email.toLowerCase().trim(), password_hash, full_name, role]
       );
       const newUser = rows[0];
       await logEvent({
+        tenant_id: tenantId(request),
         action: 'user.created',
         entity_type: 'user',
         entity_id: newUser.id,
@@ -67,20 +73,20 @@ async function routes(fastify) {
            is_active = COALESCE($3, is_active),
            password_hash = COALESCE($4, password_hash),
            updated_at = NOW()
-       WHERE id = $5
+       WHERE id = $5 AND tenant_id = $6
        RETURNING id, email, full_name, role, is_active, created_at`,
-      [full_name || null, role || null, is_active ?? null, password_hash, request.params.id]
+      [full_name || null, role || null, is_active ?? null, password_hash, request.params.id, tenantId(request)]
     );
     if (!rows.length) {
       return reply.status(404).send({ success: false, error: 'User not found' });
     }
-    // Build list of changed field names (never log values — no passwords, no PII beyond what's needed)
     const changedFields = [];
     if (full_name  != null) changedFields.push('full_name');
     if (role       != null) changedFields.push('role');
     if (is_active  != null) changedFields.push('is_active');
     if (password   != null) changedFields.push('password');
     await logEvent({
+      tenant_id: tenantId(request),
       action: 'user.updated',
       entity_type: 'user',
       entity_id: request.params.id,
@@ -98,13 +104,15 @@ async function routes(fastify) {
     }
     const { rows } = await pool.query(
       `UPDATE users SET is_active = false, updated_at = NOW()
-       WHERE id = $1 RETURNING id, email, full_name`,
-      [request.params.id]
+       WHERE id = $1 AND tenant_id = $2
+       RETURNING id, email, full_name`,
+      [request.params.id, tenantId(request)]
     );
     if (!rows.length) {
       return reply.status(404).send({ success: false, error: 'User not found' });
     }
     await logEvent({
+      tenant_id: tenantId(request),
       action: 'user.deactivated',
       entity_type: 'user',
       entity_id: request.params.id,

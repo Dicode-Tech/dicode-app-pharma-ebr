@@ -1,3 +1,26 @@
+export interface TenantInfo {
+  id: string;
+  slug: string;
+  name: string;
+}
+
+export interface TenantBranding {
+  primaryColor?: string;
+  primaryDarkColor?: string;
+  primarySoftColor?: string;
+  badgeBackground?: string;
+  badgeText?: string;
+  logoText?: string;
+  logoUrl?: string;
+}
+
+export interface TenantSettings {
+  tenant: TenantInfo;
+  branding: TenantBranding;
+  feature_flags: Record<string, boolean>;
+  compliance?: Record<string, unknown>;
+}
+
 export interface Batch {
   id: string;
   batch_number: string;
@@ -135,9 +158,14 @@ export interface AuthUser {
   email: string;
   full_name: string;
   role: UserRole;
+  tenant: TenantInfo;
 }
 
-export interface UserRecord extends AuthUser {
+export interface UserRecord {
+  id: string;
+  email: string;
+  full_name: string;
+  role: UserRole;
   is_active: boolean;
   created_at: string;
 }

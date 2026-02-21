@@ -35,6 +35,7 @@ fastify.register(require('./routes/batches'), { prefix: '/api/v1/batches' });
 fastify.register(require('./routes/recipes'), { prefix: '/api/v1/recipes' });
 fastify.register(require('./routes/audit'), { prefix: '/api/v1/audit' });
 fastify.register(require('./routes/integrations'), { prefix: '/api/v1/integrations' });
+fastify.register(require('./routes/tenant'), { prefix: '/api/v1/tenant' });
 
 // Error handler
 fastify.setErrorHandler((error, request, reply) => {

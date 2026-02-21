@@ -5,8 +5,11 @@ const { logEvent, getIp } = require('../utils/audit');
 const allRoles = [authenticate];
 const editors = [authenticate, requireRole('admin', 'batch_manager')];
 
-// ─── XML helpers ─────────────────────────────────────────────────────────────
+function tenantId(request) {
+  return request.tenant.id;
+}
 
+// ─── XML helpers ─────────────────────────────────────────────────────────────
 function escapeXml(str) {
   if (str == null) return '';
   return String(str)
@@ -18,7 +21,7 @@ function escapeXml(str) {
 }
 
 function extractXmlTag(xml, tag) {
-  const m = xml.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i'));
+  const m = xml.match(new RegExp(`<${tag}[^>]*>([\s\S]*?)<\/${tag}>`, 'i'));
   return m ? m[1].trim() : '';
 }
 
@@ -53,16 +56,16 @@ function parseXmlImport(xmlStr) {
 }
 
 // ─── Shared step insert helper ────────────────────────────────────────────────
-
-async function insertSteps(client, recipeId, steps) {
+async function insertSteps(client, tenant, recipeId, steps) {
   for (let i = 0; i < steps.length; i++) {
     const s = steps[i];
     await client.query(
       `INSERT INTO recipe_steps
-         (recipe_id, step_number, description, instructions,
+         (tenant_id, recipe_id, step_number, description, instructions,
           step_type, expected_value, unit, requires_signature, duration_minutes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
       [
+        tenant,
         recipeId,
         i + 1,
         s.description,
@@ -78,12 +81,12 @@ async function insertSteps(client, recipeId, steps) {
 }
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
-
 async function routes(fastify) {
   // GET / - list all recipes
-  fastify.get('/', { preHandler: allRoles }, async () => {
+  fastify.get('/', { preHandler: allRoles }, async (request) => {
     const { rows } = await pool.query(
-      'SELECT * FROM recipes ORDER BY created_at DESC'
+      'SELECT * FROM recipes WHERE tenant_id = $1 ORDER BY created_at DESC',
+      [tenantId(request)]
     );
     return rows;
   });
@@ -91,15 +94,15 @@ async function routes(fastify) {
   // GET /:id - get single recipe with steps
   fastify.get('/:id', { preHandler: allRoles }, async (request, reply) => {
     const { rows } = await pool.query(
-      'SELECT * FROM recipes WHERE id = $1',
-      [request.params.id]
+      'SELECT * FROM recipes WHERE id = $1 AND tenant_id = $2',
+      [request.params.id, tenantId(request)]
     );
     if (!rows.length) {
       return reply.status(404).send({ success: false, error: 'Recipe not found' });
     }
     const { rows: steps } = await pool.query(
-      'SELECT * FROM recipe_steps WHERE recipe_id = $1 ORDER BY step_number',
-      [request.params.id]
+      'SELECT * FROM recipe_steps WHERE recipe_id = $1 AND tenant_id = $2 ORDER BY step_number',
+      [request.params.id, tenantId(request)]
     );
     return { ...rows[0], steps };
   });
@@ -108,16 +111,16 @@ async function routes(fastify) {
   fastify.get('/:id/export', { preHandler: allRoles }, async (request, reply) => {
     const format = request.query.format || 'json';
     const { rows } = await pool.query(
-      'SELECT * FROM recipes WHERE id = $1',
-      [request.params.id]
+      'SELECT * FROM recipes WHERE id = $1 AND tenant_id = $2',
+      [request.params.id, tenantId(request)]
     );
     if (!rows.length) {
       return reply.status(404).send({ success: false, error: 'Recipe not found' });
     }
     const recipe = rows[0];
     const { rows: steps } = await pool.query(
-      'SELECT * FROM recipe_steps WHERE recipe_id = $1 ORDER BY step_number',
-      [request.params.id]
+      'SELECT * FROM recipe_steps WHERE recipe_id = $1 AND tenant_id = $2 ORDER BY step_number',
+      [request.params.id, tenantId(request)]
     );
 
     const safeName = recipe.name.replace(/[^a-z0-9_-]/gi, '_');
@@ -150,6 +153,7 @@ async function routes(fastify) {
 </BatchML>`;
 
       await logEvent({
+        tenant_id: tenantId(request),
         action: 'recipe.exported',
         entity_type: 'recipe',
         entity_id: recipe.id,
@@ -163,7 +167,6 @@ async function routes(fastify) {
       return reply.send(xml);
     }
 
-    // Default: JSON
     const payload = {
       format: 'dicode-ebr-recipe',
       version: '1.0',
@@ -187,6 +190,7 @@ async function routes(fastify) {
     };
 
     await logEvent({
+      tenant_id: tenantId(request),
       action: 'recipe.exported',
       entity_type: 'recipe',
       entity_id: recipe.id,
@@ -207,16 +211,17 @@ async function routes(fastify) {
     try {
       await client.query('BEGIN');
       const { rows } = await client.query(
-        `INSERT INTO recipes (name, product_name, version, description, created_by)
-         VALUES ($1, $2, $3, $4, $5)
+        `INSERT INTO recipes (tenant_id, name, product_name, version, description, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING *`,
-        [name, product_name, version || '1.0', description, created_by]
+        [tenantId(request), name, product_name, version || '1.0', description, created_by]
       );
       const recipe = rows[0];
-      await insertSteps(client, recipe.id, steps);
+      await insertSteps(client, tenantId(request), recipe.id, steps);
       await client.query('COMMIT');
 
       await logEvent({
+        tenant_id: tenantId(request),
         action: 'recipe.created',
         entity_type: 'recipe',
         entity_id: recipe.id,
@@ -242,7 +247,6 @@ async function routes(fastify) {
     if (format === 'xml') {
       parsed = parseXmlImport(typeof data === 'string' ? data : JSON.stringify(data));
     } else {
-      // JSON — data is the envelope or recipe object
       const envelope = typeof data === 'string' ? JSON.parse(data) : data;
       const r = envelope.recipe || envelope;
       parsed = {
@@ -263,16 +267,17 @@ async function routes(fastify) {
     try {
       await client.query('BEGIN');
       const { rows } = await client.query(
-        `INSERT INTO recipes (name, product_name, version, description, created_by)
-         VALUES ($1, $2, $3, $4, $5)
+        `INSERT INTO recipes (tenant_id, name, product_name, version, description, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING *`,
-        [parsed.name, parsed.product_name, parsed.version, parsed.description, created_by]
+        [tenantId(request), parsed.name, parsed.product_name, parsed.version, parsed.description, created_by]
       );
       const recipe = rows[0];
-      await insertSteps(client, recipe.id, parsed.steps);
+      await insertSteps(client, tenantId(request), recipe.id, parsed.steps);
       await client.query('COMMIT');
 
       await logEvent({
+        tenant_id: tenantId(request),
         action: 'recipe.imported',
         entity_type: 'recipe',
         entity_id: recipe.id,
@@ -303,21 +308,22 @@ async function routes(fastify) {
              version = COALESCE($3, version),
              description = COALESCE($4, description),
              updated_at = NOW()
-         WHERE id = $5
+         WHERE id = $5 AND tenant_id = $6
          RETURNING *`,
-        [name, product_name, version, description, request.params.id]
+        [name, product_name, version, description, request.params.id, tenantId(request)]
       );
       if (!rows.length) {
         await client.query('ROLLBACK');
         return reply.status(404).send({ success: false, error: 'Recipe not found' });
       }
       if (Array.isArray(steps)) {
-        await client.query('DELETE FROM recipe_steps WHERE recipe_id = $1', [request.params.id]);
-        await insertSteps(client, request.params.id, steps);
+        await client.query('DELETE FROM recipe_steps WHERE recipe_id = $1 AND tenant_id = $2', [request.params.id, tenantId(request)]);
+        await insertSteps(client, tenantId(request), request.params.id, steps);
       }
       await client.query('COMMIT');
 
       await logEvent({
+        tenant_id: tenantId(request),
         action: 'recipe.updated',
         entity_type: 'recipe',
         entity_id: request.params.id,
@@ -337,19 +343,19 @@ async function routes(fastify) {
 
   // DELETE /:id - delete recipe
   fastify.delete('/:id', { preHandler: editors }, async (request, reply) => {
-    // Fetch name before deleting for the audit log
-    const { rows: existing } = await pool.query('SELECT name, product_name FROM recipes WHERE id = $1', [request.params.id]);
+    const { rows: existing } = await pool.query('SELECT name, product_name FROM recipes WHERE id = $1 AND tenant_id = $2', [request.params.id, tenantId(request)]);
     if (!existing.length) {
       return reply.status(404).send({ success: false, error: 'Recipe not found' });
     }
     const { rowCount } = await pool.query(
-      'DELETE FROM recipes WHERE id = $1',
-      [request.params.id]
+      'DELETE FROM recipes WHERE id = $1 AND tenant_id = $2',
+      [request.params.id, tenantId(request)]
     );
     if (!rowCount) {
       return reply.status(404).send({ success: false, error: 'Recipe not found' });
     }
     await logEvent({
+      tenant_id: tenantId(request),
       action: 'recipe.deleted',
       entity_type: 'recipe',
       entity_id: request.params.id,

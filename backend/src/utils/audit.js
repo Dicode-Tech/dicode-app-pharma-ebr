@@ -16,9 +16,10 @@ function getIp(request) {
 }
 
 /**
- * Write an audit log entry.
+ * Write an audit log entry scoped to a tenant.
  *
  * @param {object} opts
+ * @param {string}  opts.tenant_id    - Tenant UUID (required)
  * @param {string}  opts.action       - Dot-notation event code, e.g. 'batch.created'
  * @param {string}  [opts.entity_type] - 'batch' | 'recipe' | 'user' | 'session'
  * @param {string}  [opts.entity_id]   - UUID of the affected entity
@@ -28,7 +29,12 @@ function getIp(request) {
  * @param {string}  [opts.ip_address]  - Client IP address
  * @param {object}  [opts.details]     - Arbitrary metadata (stored as JSONB)
  */
-async function logEvent(opts) {
+async function logEvent(opts = {}) {
+  const tenantId = opts.tenant_id || opts.tenantId;
+  if (!tenantId) {
+    throw new Error('tenant_id is required to write audit logs');
+  }
+
   const {
     action, entity_type, entity_id,
     batch_id, step_id,
@@ -37,9 +43,10 @@ async function logEvent(opts) {
 
   await pool.query(
     `INSERT INTO audit_logs
-       (action, entity_type, entity_id, batch_id, step_id, performed_by, ip_address, details)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+       (tenant_id, action, entity_type, entity_id, batch_id, step_id, performed_by, ip_address, details)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
     [
+      tenantId,
       action,
       entity_type || null,
       entity_id   || null,

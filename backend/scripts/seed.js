@@ -2,6 +2,22 @@ require('dotenv').config();
 const bcrypt = require('bcryptjs');
 const pool = require('../src/config/database');
 
+const DEMO_TENANT = {
+  slug: 'demo',
+  name: 'Dicode Demo Labs',
+  branding: {
+    primaryColor: '#1d4ed8',
+    primaryDarkColor: '#1e3a8a',
+    primarySoftColor: '#dbeafe',
+    badgeBackground: '#dcfce7',
+    badgeText: '#047857',
+    logoText: 'Dicode EBR'
+  },
+  featureFlags: {
+    planningModuleEnabled: false
+  }
+};
+
 const RECIPES = [
   {
     name: 'Paracetamol 500mg Tablet',
@@ -37,22 +53,65 @@ const RECIPES = [
   },
 ];
 
-async function seedRecipes(client) {
+async function ensureDemoTenant(client) {
+  const { rows } = await client.query(
+    `INSERT INTO tenants (slug, name)
+     VALUES ($1, $2)
+     ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name, updated_at = NOW()
+     RETURNING id`,
+    [DEMO_TENANT.slug, DEMO_TENANT.name]
+  );
+  const tenantId = rows[0]?.id || (await client.query('SELECT id FROM tenants WHERE slug = $1', [DEMO_TENANT.slug])).rows[0].id;
+
+  await client.query(
+    `INSERT INTO tenant_settings (tenant_id, branding, feature_flags)
+     VALUES ($1, $2::jsonb, $3::jsonb)
+     ON CONFLICT (tenant_id) DO UPDATE
+       SET branding = EXCLUDED.branding,
+           feature_flags = EXCLUDED.feature_flags,
+           updated_at = NOW()`,
+    [tenantId, JSON.stringify(DEMO_TENANT.branding), JSON.stringify(DEMO_TENANT.featureFlags)]
+  );
+
+  return tenantId;
+}
+
+async function seedUsers(client, tenantId) {
+  const USERS = [
+    { email: 'admin@ebr.local', full_name: 'Admin User', role: 'admin' },
+    { email: 'manager@ebr.local', full_name: 'Batch Manager', role: 'batch_manager' },
+    { email: 'supervisor@ebr.local', full_name: 'Operator Supervisor', role: 'operator_supervisor' },
+    { email: 'operator@ebr.local', full_name: 'Operator', role: 'operator' },
+    { email: 'qa@ebr.local', full_name: 'QA Officer', role: 'qa_qc' },
+  ];
+  const password_hash = await bcrypt.hash('Password1!', 10);
+  for (const u of USERS) {
+    await client.query(
+      `INSERT INTO users (tenant_id, email, password_hash, full_name, role)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (tenant_id, email) DO NOTHING`,
+      [tenantId, u.email, password_hash, u.full_name, u.role]
+    );
+    console.log(`  ✓ User: ${u.full_name} (${u.role}) — ${u.email}`);
+  }
+}
+
+async function seedRecipes(client, tenantId) {
   const recipeIds = [];
   for (const recipe of RECIPES) {
     const { rows } = await client.query(
-      `INSERT INTO recipes (name, product_name, version, description, created_by)
-       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-      [recipe.name, recipe.product_name, recipe.version, recipe.description, recipe.created_by]
+      `INSERT INTO recipes (tenant_id, name, product_name, version, description, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      [tenantId, recipe.name, recipe.product_name, recipe.version, recipe.description, recipe.created_by]
     );
     const recipeId = rows[0].id;
     recipeIds.push(recipeId);
 
     for (const step of recipe.steps) {
       await client.query(
-        `INSERT INTO recipe_steps (recipe_id, step_number, description, step_type, expected_value, unit, requires_signature, duration_minutes, instructions)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [recipeId, step.step_number, step.description, step.step_type, step.expected_value || null, step.unit || null, step.requires_signature, step.duration_minutes || null, step.instructions]
+        `INSERT INTO recipe_steps (tenant_id, recipe_id, step_number, description, step_type, expected_value, unit, requires_signature, duration_minutes, instructions)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)` ,
+        [tenantId, recipeId, step.step_number, step.description, step.step_type, step.expected_value || null, step.unit || null, step.requires_signature, step.duration_minutes || null, step.instructions]
       );
     }
     console.log(`  ✓ Recipe: ${recipe.name} (${recipe.steps.length} steps)`);
@@ -60,7 +119,7 @@ async function seedRecipes(client) {
   return recipeIds;
 }
 
-async function seedBatches(client, recipeIds) {
+async function seedBatches(client, tenantId, recipeIds) {
   const now = new Date();
   const d = (days) => new Date(now - days * 86400000);
 
@@ -161,24 +220,24 @@ async function seedBatches(client, recipeIds) {
 
   for (const batch of BATCHES) {
     const { rows } = await client.query(
-      `INSERT INTO batches (batch_number, product_name, batch_size, status, recipe_id, created_by, started_at, completed_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-      [batch.batch_number, batch.product_name, batch.batch_size, batch.status, batch.recipe_id, batch.created_by, batch.started_at || null, batch.completed_at || null]
+      `INSERT INTO batches (tenant_id, batch_number, product_name, batch_size, status, recipe_id, created_by, started_at, completed_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+      [tenantId, batch.batch_number, batch.product_name, batch.batch_size, batch.status, batch.recipe_id, batch.created_by, batch.started_at || null, batch.completed_at || null]
     );
     const batchId = rows[0].id;
 
-    // Fetch recipe steps to get descriptions, types, etc.
     const { rows: recipeSteps } = await client.query(
-      'SELECT * FROM recipe_steps WHERE recipe_id = $1 ORDER BY step_number',
-      [batch.recipe_id]
+      'SELECT * FROM recipe_steps WHERE recipe_id = $1 AND tenant_id = $2 ORDER BY step_number',
+      [batch.recipe_id, tenantId]
     );
 
     for (const step of batch.steps) {
       const recipeStep = recipeSteps[step.step_number - 1];
       await client.query(
-        `INSERT INTO batch_steps (batch_id, step_number, description, instructions, step_type, expected_value, unit, requires_signature, actual_value, status, performed_by, notes, started_at, completed_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+        `INSERT INTO batch_steps (tenant_id, batch_id, step_number, description, instructions, step_type, expected_value, unit, requires_signature, actual_value, status, performed_by, notes, started_at, completed_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)` ,
         [
+          tenantId,
           batchId,
           step.step_number,
           recipeStep.description,
@@ -197,57 +256,29 @@ async function seedBatches(client, recipeIds) {
       );
     }
 
-    // Seed audit logs for completed and active batches
+    const auditEntries = [];
     if (batch.status !== 'draft') {
-      await client.query(
-        `INSERT INTO audit_logs (batch_id, action, performed_by, details)
-         VALUES ($1, $2, $3, $4)`,
-        [batchId, 'batch_created', batch.created_by, JSON.stringify({ batch_number: batch.batch_number })]
-      );
+      auditEntries.push({ action: 'batch_created', details: { batch_number: batch.batch_number } });
     }
     if (batch.started_at) {
-      await client.query(
-        `INSERT INTO audit_logs (batch_id, action, performed_by, details)
-         VALUES ($1, $2, $3, $4)`,
-        [batchId, 'start', batch.created_by, JSON.stringify({ batch_number: batch.batch_number })]
-      );
+      auditEntries.push({ action: 'start', details: { batch_number: batch.batch_number } });
     }
     if (batch.completed_at) {
-      await client.query(
-        `INSERT INTO audit_logs (batch_id, action, performed_by, details)
-         VALUES ($1, $2, $3, $4)`,
-        [batchId, 'complete', batch.created_by, JSON.stringify({ batch_number: batch.batch_number })]
-      );
+      auditEntries.push({ action: 'complete', details: { batch_number: batch.batch_number } });
     }
     if (batch.status === 'cancelled') {
+      auditEntries.push({ action: 'cancel', details: { reason: 'API CoA failure — batch void' } });
+    }
+
+    for (const entry of auditEntries) {
       await client.query(
-        `INSERT INTO audit_logs (batch_id, action, performed_by, details)
-         VALUES ($1, $2, $3, $4)`,
-        [batchId, 'cancel', batch.created_by, JSON.stringify({ reason: 'API CoA failure — batch void' })]
+        `INSERT INTO audit_logs (tenant_id, batch_id, action, performed_by, details)
+         VALUES ($1, $2, $3, $4, $5)` ,
+        [tenantId, batchId, entry.action, batch.created_by, JSON.stringify(entry.details)]
       );
     }
 
     console.log(`  ✓ Batch: ${batch.batch_number} [${batch.status}] — ${batch.steps.length} steps`);
-  }
-}
-
-async function seedUsers(client) {
-  const USERS = [
-    { email: 'admin@ebr.local', full_name: 'Admin User', role: 'admin' },
-    { email: 'manager@ebr.local', full_name: 'Batch Manager', role: 'batch_manager' },
-    { email: 'supervisor@ebr.local', full_name: 'Operator Supervisor', role: 'operator_supervisor' },
-    { email: 'operator@ebr.local', full_name: 'Operator', role: 'operator' },
-    { email: 'qa@ebr.local', full_name: 'QA Officer', role: 'qa_qc' },
-  ];
-  const password_hash = await bcrypt.hash('Password1!', 10);
-  for (const u of USERS) {
-    await client.query(
-      `INSERT INTO users (email, password_hash, full_name, role)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (email) DO NOTHING`,
-      [u.email, password_hash, u.full_name, u.role]
-    );
-    console.log(`  ✓ User: ${u.full_name} (${u.role}) — ${u.email}`);
   }
 }
 
@@ -258,22 +289,24 @@ async function seed() {
 
     await client.query('BEGIN');
 
-    // Clear existing data
-    await client.query('DELETE FROM audit_logs');
-    await client.query('DELETE FROM pdf_reports');
-    await client.query('DELETE FROM batch_steps');
-    await client.query('DELETE FROM batches');
-    await client.query('DELETE FROM recipe_steps');
-    await client.query('DELETE FROM recipes');
+    const tenantId = await ensureDemoTenant(client);
+
+    await client.query('DELETE FROM audit_logs WHERE tenant_id = $1', [tenantId]);
+    await client.query('DELETE FROM pdf_reports WHERE tenant_id = $1', [tenantId]);
+    await client.query('DELETE FROM batch_steps WHERE tenant_id = $1', [tenantId]);
+    await client.query('DELETE FROM batches WHERE tenant_id = $1', [tenantId]);
+    await client.query('DELETE FROM recipe_steps WHERE tenant_id = $1', [tenantId]);
+    await client.query('DELETE FROM recipes WHERE tenant_id = $1', [tenantId]);
+    await client.query('DELETE FROM users WHERE tenant_id = $1', [tenantId]);
 
     console.log('Seeding users...');
-    await seedUsers(client);
+    await seedUsers(client, tenantId);
 
     console.log('\nSeeding recipes...');
-    const recipeIds = await seedRecipes(client);
+    const recipeIds = await seedRecipes(client, tenantId);
 
     console.log('\nSeeding batches...');
-    await seedBatches(client, recipeIds);
+    await seedBatches(client, tenantId, recipeIds);
 
     await client.query('COMMIT');
     console.log('\nSeed completed successfully.');

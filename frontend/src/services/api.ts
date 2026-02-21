@@ -3,7 +3,7 @@ import type {
   Batch, BatchStep, Recipe, AuditLogEntry, AuditEntityType,
   CreateBatchRequest, UpdateStepRequest, SignStepRequest,
   OpcReading, Equipment, Alarm,
-  AuthUser, UserRecord,
+  AuthUser, UserRecord, TenantSettings,
 } from '../types';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
@@ -14,7 +14,6 @@ const api = axios.create({
   withCredentials: true,
 });
 
-// Redirect to /login on 401 (expired or missing session)
 api.interceptors.response.use(
   (res) => res,
   (err) => {
@@ -25,11 +24,12 @@ api.interceptors.response.use(
   }
 );
 
-// ─── Auth ─────────────────────────────────────────────────────────────────────
+const DEFAULT_TENANT = import.meta.env.VITE_DEFAULT_TENANT || 'demo';
 
+// ─── Auth ─────────────────────────────────────────────────────────────────────
 export const authService = {
-  login: (email: string, password: string): Promise<AuthUser> =>
-    api.post('/auth/login', { email, password }).then((r) => r.data),
+  login: (email: string, password: string, tenant?: string): Promise<AuthUser> =>
+    api.post('/auth/login', { email, password, tenant: tenant || DEFAULT_TENANT }).then((r) => r.data),
 
   logout: (): Promise<void> =>
     api.post('/auth/logout').then(() => undefined),
@@ -38,8 +38,13 @@ export const authService = {
     api.get('/auth/me').then((r) => r.data),
 };
 
-// ─── Users (admin) ────────────────────────────────────────────────────────────
+// ─── Tenant ───────────────────────────────────────────────────────────────────
+export const tenantService = {
+  getSettings: (): Promise<TenantSettings> =>
+    api.get('/tenant/settings').then((r) => r.data),
+};
 
+// ─── Users (admin) ────────────────────────────────────────────────────────────
 export const userService = {
   getAllUsers: (): Promise<UserRecord[]> =>
     api.get('/users').then((r) => r.data),
@@ -55,7 +60,6 @@ export const userService = {
 };
 
 // ─── Batches ────────────────────────────────────────────────────────────────
-
 export const batchService = {
   getAllBatches: (): Promise<Batch[]> =>
     api.get('/batches').then((r) => r.data),
@@ -75,7 +79,6 @@ export const batchService = {
   cancelBatch: (id: string, reason?: string): Promise<Batch> =>
     api.post(`/batches/${id}/cancel`, { reason }).then((r) => r.data),
 
-  // Steps
   getBatchSteps: (batchId: string): Promise<BatchStep[]> =>
     api.get(`/batches/${batchId}/steps`).then((r) => r.data),
 
@@ -85,14 +88,12 @@ export const batchService = {
   signStep: (batchId: string, stepId: string, data: SignStepRequest): Promise<BatchStep> =>
     api.post(`/batches/${batchId}/steps/${stepId}/sign`, data).then((r) => r.data),
 
-  // Audit
   getBatchAuditLog: (batchId: string): Promise<AuditLogEntry[]> =>
     api.get(`/batches/${batchId}/audit`).then((r) => r.data),
 
   getAllAuditLogs: (limit = 100, offset = 0): Promise<AuditLogEntry[]> =>
     api.get('/batches/audit/all', { params: { limit, offset } }).then((r) => r.data),
 
-  // PDF Report
   generateReport: (batchId: string): Promise<{ success: boolean; reportId: string }> =>
     api.post(`/batches/${batchId}/report`).then((r) => r.data),
 
@@ -101,7 +102,6 @@ export const batchService = {
 };
 
 // ─── Recipes ─────────────────────────────────────────────────────────────────
-
 export const recipeService = {
   getAllRecipes: (): Promise<Recipe[]> =>
     api.get('/recipes').then((r) => r.data),
@@ -136,14 +136,12 @@ export const recipeService = {
 };
 
 // ─── Audit ───────────────────────────────────────────────────────────────────
-
 export const auditService = {
   getAll: (params?: { entity_type?: AuditEntityType; limit?: number; offset?: number }): Promise<AuditLogEntry[]> =>
     api.get('/audit', { params }).then((r) => r.data),
 };
 
 // ─── Integrations ────────────────────────────────────────────────────────────
-
 export const integrationService = {
   getStatus: (): Promise<{ connected: boolean; endpoint: string; server: string; timestamp: string }> =>
     api.get('/integrations/status').then((r) => r.data),

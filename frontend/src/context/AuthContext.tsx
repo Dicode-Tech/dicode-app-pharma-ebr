@@ -7,12 +7,14 @@ import type { AuthUser, UserRole } from '../types';
 interface AuthContextValue {
   user: AuthUser | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, tenant?: string) => Promise<void>;
   logout: () => Promise<void>;
   hasRole: (...roles: UserRole[]) => boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+const DEFAULT_TENANT = import.meta.env.VITE_DEFAULT_TENANT || 'demo';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -26,8 +28,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false));
   }, []);
 
-  async function login(email: string, password: string) {
-    const u = await authService.login(email, password);
+  async function login(email: string, password: string, tenant?: string) {
+    const u = await authService.login(email, password, tenant || DEFAULT_TENANT);
     setUser(u);
     navigate('/');
   }

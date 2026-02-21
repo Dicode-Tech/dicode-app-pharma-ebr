@@ -10,7 +10,18 @@ async function authenticate(request, reply) {
     throw err;
   }
   try {
-    request.user = jwt.verify(token, JWT_SECRET);
+    const payload = jwt.verify(token, JWT_SECRET);
+    if (!payload.tenant_id) {
+      const err = new Error('Tenant context missing in token');
+      err.statusCode = 401;
+      throw err;
+    }
+    request.user = payload;
+    request.tenant = {
+      id: payload.tenant_id,
+      slug: payload.tenant_slug,
+      name: payload.tenant_name,
+    };
   } catch {
     const err = new Error('Invalid or expired token');
     err.statusCode = 401;

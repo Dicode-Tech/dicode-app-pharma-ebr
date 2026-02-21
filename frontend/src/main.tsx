@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
+import { TenantProvider } from './context/TenantContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
@@ -20,7 +21,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <BrowserRouter>
       <AuthProvider>
-        <Routes>
+        <TenantProvider>
+          <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
           <Route path="/batches" element={<ProtectedRoute><BatchList /></ProtectedRoute>} />
@@ -33,7 +35,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="/audit" element={<ProtectedRoute><AuditTrail /></ProtectedRoute>} />
           <Route path="/integrations" element={<ProtectedRoute><IntegrationStatus /></ProtectedRoute>} />
           <Route path="/admin" element={<ProtectedRoute roles={['admin']}><AdminPanel /></ProtectedRoute>} />
-        </Routes>
+          </Routes>
+        </TenantProvider>
       </AuthProvider>
     </BrowserRouter>
   </React.StrictMode>
